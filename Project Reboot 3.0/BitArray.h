@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ContainerAllocationPolicies.h"
+#include <cstring>
 
 static FORCEINLINE uint32 CountLeadingZeros(uint32 Value)
 {
@@ -23,6 +24,122 @@ public:
     int NumBits;
     int MaxBits;
 
+    TBitArray()
+        : NumBits(0)
+        , MaxBits(Data.NumInlineBits())
+    {
+        Data.SecondaryData = nullptr;
+        std::memset(Data.InlineData, 0, sizeof(Data.InlineData));
+    }
+
+    TBitArray(const TBitArray& Other)
+        : NumBits(Other.NumBits)
+        , MaxBits(Other.MaxBits)
+    {
+        Data.SecondaryData = nullptr;
+
+        if (Other.Data.SecondaryData)
+        {
+            const int32 NumDWORDs = MaxBits / NumBitsPerDWORD;
+            Data.SecondaryData = new uint32[NumDWORDs];
+            std::memcpy(Data.SecondaryData, Other.Data.SecondaryData, sizeof(uint32) * NumDWORDs);
+        }
+        else
+        {
+            std::memcpy(Data.InlineData, Other.Data.InlineData, sizeof(Data.InlineData));
+        }
+    }
+
+    TBitArray& operator=(const TBitArray& Other)
+    {
+        if (this != &Other)
+        {
+            NumBits = Other.NumBits;
+            MaxBits = Other.MaxBits;
+
+            const int32 NumDWORDs = MaxBits / NumBitsPerDWORD;
+            uint32* Destination = nullptr;
+
+            if (Other.Data.SecondaryData)
+            {
+                delete[] Data.SecondaryData;
+                Data.SecondaryData = new uint32[NumDWORDs];
+                Destination = Data.SecondaryData;
+            }
+            else
+            {
+                delete[] Data.SecondaryData;
+                Data.SecondaryData = nullptr;
+                Destination = reinterpret_cast<uint32*>(Data.InlineData);
+            }
+
+            std::memcpy(Destination, Other.GetDataPtr(), sizeof(uint32) * NumDWORDs);
+        }
+
+        return *this;
+    }
+
+    ~TBitArray()
+    {
+        delete[] Data.SecondaryData;
+        Data.SecondaryData = nullptr;
+    }
+
+private:
+    FORCEINLINE int32 NumInlineDWORDs() const
+    {
+        return Data.NumInlineBits() / NumBitsPerDWORD;
+    }
+
+    FORCEINLINE uint32* GetInlineDataPtr()
+    {
+        return reinterpret_cast<uint32*>(Data.InlineData);
+    }
+
+    FORCEINLINE const uint32* GetInlineDataPtr() const
+    {
+        return reinterpret_cast<const uint32*>(Data.InlineData);
+    }
+
+    FORCEINLINE uint32* GetDataPtr()
+    {
+        return Data.SecondaryData ? Data.SecondaryData : GetInlineDataPtr();
+    }
+
+    FORCEINLINE const uint32* GetDataPtr() const
+    {
+        return Data.SecondaryData ? Data.SecondaryData : GetInlineDataPtr();
+    }
+
+    void EnsureCapacity(int32 BitIndex)
+    {
+        const int32 RequiredBits = BitIndex + 1;
+        if (RequiredBits <= MaxBits)
+        {
+            return;
+        }
+
+        const int32 RequiredDWORDs = (RequiredBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+        const int32 OldDWORDs = MaxBits / NumBitsPerDWORD;
+        uint32* SourceData = GetDataPtr();
+
+        if (RequiredDWORDs <= NumInlineDWORDs())
+        {
+            MaxBits = Data.NumInlineBits();
+            return;
+        }
+
+        uint32* NewData = new uint32[RequiredDWORDs];
+        std::memset(NewData, 0, sizeof(uint32) * RequiredDWORDs);
+        std::memcpy(NewData, SourceData, sizeof(uint32) * OldDWORDs);
+
+        delete[] Data.SecondaryData;
+        Data.SecondaryData = NewData;
+        MaxBits = RequiredDWORDs * NumBitsPerDWORD;
+    }
+
+public:
+
     struct FRelativeBitReference
     {
     public:
@@ -44,7 +161,7 @@ public:
             , Mask(InMask)
         {
         }
-        FORCEINLINE const FBitReference(const uint32& InData, const uint32 InMask)
+        FORCEINLINE FBitReference(const uint32& InData, const uint32 InMask)
             : Data(const_cast<uint32&>(InData))
             , Mask(InMask)
         {
@@ -82,13 +199,13 @@ public:
         const TBitArray& IteratedArray;
 
     public:
-        FORCEINLINE const FBitIterator(const TBitArray& ToIterate, const int32 StartIndex) // Begin
+        FORCEINLINE FBitIterator(const TBitArray& ToIterate, const int32 StartIndex) // Begin
             : IteratedArray(ToIterate)
             , Index(StartIndex)
             , FRelativeBitReference(StartIndex)
         {
         }
-        FORCEINLINE const FBitIterator(const TBitArray& ToIterate) // End
+        FORCEINLINE FBitIterator(const TBitArray& ToIterate) // End
             : IteratedArray(ToIterate)
             , Index(ToIterate.NumBits)
             , FRelativeBitReference(ToIterate.NumBits)
@@ -307,17 +424,24 @@ public:
     }
     FORCEINLINE bool IsSet(int32 Index) const
     {
+        if (Index < 0 || Index >= MaxBits)
+        {
+            return false;
+        }
+
         return *FBitIterator(*this, Index);
     }
     FORCEINLINE void Set(const int32 Index, const bool Value, bool bIsSettingAllZero = false)
     {
+        EnsureCapacity(Index);
+
         const int32 DWORDIndex = (Index >> ((int32)5));
         const int32 Mask = (1 << (Index & (((int32)32) - 1)));
 
         if (!bIsSettingAllZero)
-            NumBits = Index >= NumBits ? Index < MaxBits ? Index + 1 : NumBits : NumBits;
+            NumBits = Index >= NumBits ? Index + 1 : NumBits;
 
-        FBitReference(Data[DWORDIndex], Mask).SetBit(Value);
+        FBitReference(GetDataPtr()[DWORDIndex], Mask).SetBit(Value);
     }
     FORCEINLINE void ZeroAll()
     {
