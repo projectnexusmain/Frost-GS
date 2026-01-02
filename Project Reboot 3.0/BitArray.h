@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ContainerAllocationPolicies.h"
+#include <cstring>
 
 static FORCEINLINE uint32 CountLeadingZeros(uint32 Value)
 {
@@ -23,6 +24,14 @@ public:
     int NumBits;
     int MaxBits;
 
+    TBitArray()
+        : NumBits(0)
+        , MaxBits(Data.NumInlineBits())
+    {
+        Data.SecondaryData = nullptr;
+        std::memset(Data.InlineData, 0, sizeof(Data.InlineData));
+    }
+
     struct FRelativeBitReference
     {
     public:
@@ -44,7 +53,7 @@ public:
             , Mask(InMask)
         {
         }
-        FORCEINLINE const FBitReference(const uint32& InData, const uint32 InMask)
+        FORCEINLINE FBitReference(const uint32& InData, const uint32 InMask)
             : Data(const_cast<uint32&>(InData))
             , Mask(InMask)
         {
@@ -82,13 +91,13 @@ public:
         const TBitArray& IteratedArray;
 
     public:
-        FORCEINLINE const FBitIterator(const TBitArray& ToIterate, const int32 StartIndex) // Begin
+        FORCEINLINE FBitIterator(const TBitArray& ToIterate, const int32 StartIndex) // Begin
             : IteratedArray(ToIterate)
             , Index(StartIndex)
             , FRelativeBitReference(StartIndex)
         {
         }
-        FORCEINLINE const FBitIterator(const TBitArray& ToIterate) // End
+        FORCEINLINE FBitIterator(const TBitArray& ToIterate) // End
             : IteratedArray(ToIterate)
             , Index(ToIterate.NumBits)
             , FRelativeBitReference(ToIterate.NumBits)
