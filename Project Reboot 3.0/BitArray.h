@@ -323,6 +323,11 @@ public:
             }
 
             const int32 ArrayNum = IteratedArray.NumBits;
+            if (ArrayNum <= 0)
+            {
+                CurrentBitIndex = 0;
+                return;
+            }
             const int32 LastDWORDIndex = (ArrayNum - 1) / NumBitsPerDWORD;
 
             uint32 RemainingBitMask = ArrayData[this->DWORDIndex] & UnvisitedBitMask;
