@@ -53,6 +53,12 @@ public:
     int32 FirstFreeIndex;
     int32 NumFreeIndices;
 
+    TSparseArray()
+        : FirstFreeIndex(INDEX_NONE)
+        , NumFreeIndices(0)
+    {
+    }
+
     FORCEINLINE int32 Num() const
     {
         return Data.Num() - NumFreeIndices;
