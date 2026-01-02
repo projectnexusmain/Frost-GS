@@ -168,11 +168,22 @@ public:
             }
             return *this;
         }
-        FORCEINLINE bool operator*() const
+    FORCEINLINE bool operator*() const
+    {
+        const uint32* DataPtr = IteratedArray.GetDataPtr();
+        if (!DataPtr)
         {
-            const uint32* DataPtr = IteratedArray.GetDataPtr();
-            return (DataPtr[this->DWORDIndex] & this->Mask) != 0;
+            return false;
         }
+
+        const size_t WordCount = IteratedArray.Data.size();
+        if (this->DWORDIndex < 0 || static_cast<size_t>(this->DWORDIndex) >= WordCount)
+        {
+            return false;
+        }
+
+        return (DataPtr[this->DWORDIndex] & this->Mask) != 0;
+    }
         FORCEINLINE bool operator==(const FBitIterator& OtherIt) const
         {
             return Index == OtherIt.Index;
@@ -265,7 +276,7 @@ public:
         {
             const uint32* ArrayData = IteratedArray.GetDataPtr();
 
-            if (!ArrayData)
+            if (!ArrayData || IteratedArray.NumBits <= 0)
             {
                 CurrentBitIndex = IteratedArray.NumBits;
                 return;
@@ -278,6 +289,12 @@ public:
                 return;
             }
             const int32 LastDWORDIndex = (ArrayNum - 1) / NumBitsPerDWORD;
+
+            if (this->DWORDIndex < 0)
+            {
+                CurrentBitIndex = ArrayNum;
+                return;
+            }
 
             uint32 RemainingBitMask = ArrayData[this->DWORDIndex] & UnvisitedBitMask;
 
@@ -385,7 +402,12 @@ public:
     FORCEINLINE void ZeroAll()
     {
         const int32 DWORDCount = (MaxBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
-        std::memset(GetDataPtr(), 0, sizeof(uint32) * DWORDCount);
+
+        if (DWORDCount > 0 && !Data.empty())
+        {
+            std::memset(GetDataPtr(), 0, sizeof(uint32) * DWORDCount);
+        }
+
         NumBits = 0;
     }
 };
