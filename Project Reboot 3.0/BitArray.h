@@ -3,7 +3,6 @@
 #include "ContainerAllocationPolicies.h"
 #include <algorithm>
 #include <cstring>
-#include <vector>
 
 static FORCEINLINE uint32 CountLeadingZeros(uint32 Value)
 {
@@ -22,137 +21,106 @@ static FORCEINLINE uint32 CountLeadingZeros(uint32 Value)
 class TBitArray
 {
 public:
-    static constexpr int32 InlineDWORDs = 4;
+    using FAllocator = TInlineAllocator<4>::ForElementType<unsigned int>;
 
-    std::vector<uint32> Storage;
+    FAllocator Data;
     int32 NumBits;
     int32 MaxBits;
-
-    TBitArray()
-        : Storage(InlineDWORDs, 0)
-        , NumBits(0)
-        , MaxBits(InlineDWORDs * NumBitsPerDWORD)
-    {
-    }
-
-    TBitArray(const TBitArray& Other) = default;
-    TBitArray& operator=(const TBitArray& Other) = default;
-    ~TBitArray() = default;
-
-private:
-    FORCEINLINE uint32* GetDataPtr()
-    {
-        return Storage.data();
-    }
-
-    FORCEINLINE const uint32* GetDataPtr() const
-    {
-        return Storage.data();
-    }
-
-    void EnsureCapacity(int32 BitIndex)
-    {
-        const int32 RequiredBits = BitIndex + 1;
-        if (RequiredBits <= MaxBits)
-        {
-            return;
-        }
-
-        const int32 RequiredDWORDs = (RequiredBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
-        const int32 CurrentDWORDs = static_cast<int32>(Storage.size());
-        const int32 NewDWORDs = std::max(RequiredDWORDs, CurrentDWORDs * 2);
-
-        Storage.resize(NewDWORDs, 0u);
-        MaxBits = NewDWORDs * NumBitsPerDWORD;
-    }
-
-public:
 
     TBitArray()
         : NumBits(0)
         , MaxBits(Data.NumInlineBits())
     {
+        std::memset(Data.GetInlineElements(), 0, Data.NumInlineBytes());
         Data.SecondaryData = nullptr;
-        std::memset(Data.InlineData, 0, sizeof(Data.InlineData));
     }
 
     TBitArray(const TBitArray& Other)
         : NumBits(Other.NumBits)
         , MaxBits(Other.MaxBits)
     {
-        Data.SecondaryData = nullptr;
-
-        if (Other.Data.SecondaryData)
+        const int32 RequiredDWORDs = (MaxBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+        if (MaxBits > Data.NumInlineBits())
         {
-            const int32 NumDWORDs = MaxBits / NumBitsPerDWORD;
-            Data.SecondaryData = new uint32[NumDWORDs];
-            std::memcpy(Data.SecondaryData, Other.Data.SecondaryData, sizeof(uint32) * NumDWORDs);
+            Data.SecondaryData = new uint32[RequiredDWORDs];
+            std::memcpy(Data.SecondaryData, Other.GetDataPtr(), sizeof(uint32) * RequiredDWORDs);
         }
         else
         {
-            std::memcpy(Data.InlineData, Other.Data.InlineData, sizeof(Data.InlineData));
+            Data.SecondaryData = nullptr;
+            std::memcpy(Data.GetInlineElements(), Other.GetDataPtr(), Data.NumInlineBytes());
         }
     }
 
     TBitArray& operator=(const TBitArray& Other)
     {
-        if (this != &Other)
+        if (this == &Other)
         {
-            NumBits = Other.NumBits;
-            MaxBits = Other.MaxBits;
-
-            const int32 NumDWORDs = MaxBits / NumBitsPerDWORD;
-            uint32* Destination = nullptr;
-
-            if (Other.Data.SecondaryData)
-            {
-                delete[] Data.SecondaryData;
-                Data.SecondaryData = new uint32[NumDWORDs];
-                Destination = Data.SecondaryData;
-            }
-            else
-            {
-                delete[] Data.SecondaryData;
-                Data.SecondaryData = nullptr;
-                Destination = reinterpret_cast<uint32*>(Data.InlineData);
-            }
-
-            std::memcpy(Destination, Other.GetDataPtr(), sizeof(uint32) * NumDWORDs);
+            return *this;
         }
 
+        const int32 RequiredDWORDs = (Other.MaxBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+        ResizeStorage(Other.MaxBits, RequiredDWORDs);
+
+        NumBits = Other.NumBits;
+        MaxBits = Other.MaxBits;
+
+        std::memcpy(GetDataPtr(), Other.GetDataPtr(), sizeof(uint32) * RequiredDWORDs);
         return *this;
     }
 
     ~TBitArray()
     {
-        delete[] Data.SecondaryData;
-        Data.SecondaryData = nullptr;
+        if (Data.SecondaryData)
+        {
+            delete[] Data.SecondaryData;
+            Data.SecondaryData = nullptr;
+        }
     }
 
 private:
-    FORCEINLINE int32 NumInlineDWORDs() const
-    {
-        return Data.NumInlineBits() / NumBitsPerDWORD;
-    }
-
-    FORCEINLINE uint32* GetInlineDataPtr()
-    {
-        return reinterpret_cast<uint32*>(Data.InlineData);
-    }
-
-    FORCEINLINE const uint32* GetInlineDataPtr() const
-    {
-        return reinterpret_cast<const uint32*>(Data.InlineData);
-    }
-
     FORCEINLINE uint32* GetDataPtr()
     {
-        return Data.SecondaryData ? Data.SecondaryData : GetInlineDataPtr();
+        return Data.SecondaryData ? Data.SecondaryData : Data.GetInlineElements();
     }
 
     FORCEINLINE const uint32* GetDataPtr() const
     {
-        return Data.SecondaryData ? Data.SecondaryData : GetInlineDataPtr();
+        return Data.SecondaryData ? Data.SecondaryData : Data.GetInlineElements();
+    }
+
+    void ResizeStorage(int32 DesiredBits, int32 RequiredDWORDs)
+    {
+        if (DesiredBits <= Data.NumInlineBits())
+        {
+            if (Data.SecondaryData)
+            {
+                delete[] Data.SecondaryData;
+                Data.SecondaryData = nullptr;
+            }
+            std::memset(Data.GetInlineElements(), 0, Data.NumInlineBytes());
+            return;
+        }
+
+        if (!Data.SecondaryData || MaxBits < DesiredBits)
+        {
+            uint32* NewBuffer = new uint32[RequiredDWORDs];
+            std::memset(NewBuffer, 0, sizeof(uint32) * RequiredDWORDs);
+
+            if (Data.SecondaryData)
+            {
+                const int32 CurrentDWORDs = (MaxBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+                std::memcpy(NewBuffer, Data.SecondaryData, sizeof(uint32) * CurrentDWORDs);
+                delete[] Data.SecondaryData;
+            }
+            else
+            {
+                const int32 InlineDWORDs = (Data.NumInlineBits() + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+                std::memcpy(NewBuffer, Data.GetInlineElements(), sizeof(uint32) * InlineDWORDs);
+            }
+
+            Data.SecondaryData = NewBuffer;
+        }
     }
 
     void EnsureCapacity(int32 BitIndex)
@@ -164,26 +132,11 @@ private:
         }
 
         const int32 RequiredDWORDs = (RequiredBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
-        const int32 OldDWORDs = MaxBits / NumBitsPerDWORD;
-        uint32* SourceData = GetDataPtr();
-
-        if (RequiredDWORDs <= NumInlineDWORDs())
-        {
-            MaxBits = Data.NumInlineBits();
-            return;
-        }
-
-        uint32* NewData = new uint32[RequiredDWORDs];
-        std::memset(NewData, 0, sizeof(uint32) * RequiredDWORDs);
-        std::memcpy(NewData, SourceData, sizeof(uint32) * OldDWORDs);
-
-        delete[] Data.SecondaryData;
-        Data.SecondaryData = NewData;
+        ResizeStorage(RequiredBits, RequiredDWORDs);
         MaxBits = RequiredDWORDs * NumBitsPerDWORD;
     }
 
 public:
-
     struct FRelativeBitReference
     {
     public:
@@ -214,11 +167,6 @@ public:
         FORCEINLINE void SetBit(const bool Value)
         {
             Value ? Data |= Mask : Data &= ~Mask;
-
-            // 10011101 - Data			 // 10011101 - Data
-            // 00000010 - Mask - true |	 // 00000010 - Mask - false
-            // 10011111	-  |=			 // 11111101 -  ~
-            //							 // 10011111 -  &=
         }
 
         FORCEINLINE operator bool() const
@@ -487,7 +435,8 @@ public:
     }
     FORCEINLINE void ZeroAll()
     {
-        std::fill(Storage.begin(), Storage.end(), 0u);
+        const int32 DWORDCount = (MaxBits + NumBitsPerDWORD - 1) / NumBitsPerDWORD;
+        std::memset(GetDataPtr(), 0, sizeof(uint32) * DWORDCount);
         NumBits = 0;
     }
 };
