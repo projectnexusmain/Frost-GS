@@ -26,7 +26,7 @@ public:
 
     TBitArray()
         : NumBits(0)
-        , MaxBits(0)
+        , MaxBits(Data.NumInlineBits())
     {
         Data.SecondaryData = nullptr;
         std::memset(Data.InlineData, 0, sizeof(Data.InlineData));
