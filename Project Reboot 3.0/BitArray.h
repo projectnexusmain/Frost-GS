@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ContainerAllocationPolicies.h"
+#include <cstring>
 
 static FORCEINLINE uint32 CountLeadingZeros(uint32 Value)
 {
@@ -22,6 +23,14 @@ public:
     TInlineAllocator<4>::ForElementType<unsigned int> Data;
     int NumBits;
     int MaxBits;
+
+    TBitArray()
+        : NumBits(0)
+        , MaxBits(0)
+    {
+        Data.SecondaryData = nullptr;
+        std::memset(Data.InlineData, 0, sizeof(Data.InlineData));
+    }
 
     struct FRelativeBitReference
     {
